@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FB Lead Scraper - Settings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      font-size: 22px;
+      margin-bottom: 20px;
+      color: #fff;
+    }
+    h1 span { color: #60a5fa; }
+
+    /* -- Tabs -- */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      border-bottom: 2px solid #1e293b;
+      margin-bottom: 20px;
+    }
+    .tab {
+      padding: 10px 18px;
+      cursor: pointer;
+      border-radius: 8px 8px 0 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: #888;
+      background: transparent;
+      border: none;
+      transition: all 0.15s;
+    }
+    .tab:hover { color: #bbb; background: #1a1a2e; }
+    .tab.active { color: #60a5fa; background: #1a1a2e; border-bottom: 2px solid #60a5fa; margin-bottom: -2px; }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* -- Panels -- */
+    .panel {
+      background: #1a1a2e;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .panel h3 {
+      font-size: 14px;
+      color: #a5b4fc;
+      margin-bottom: 12px;
+    }
+    .panel p.hint {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 12px;
+    }
+
+    /* -- Form elements -- */
+    label {
+      display: block;
+      font-size: 12px;
+      color: #999;
+      margin-bottom: 4px;
+    }
+    input[type="text"], input[type="number"], input[type="url"], textarea {
+      width: 100%;
+      padding: 8px 10px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 13px;
+      font-family: inherit;
+      margin-bottom: 10px;
+    }
+    input:focus, textarea:focus { outline: none; border-color: #60a5fa; }
+    textarea { resize: vertical; min-height: 60px; }
+
+    .row { display: flex; gap: 10px; align-items: flex-end; }
+    .row > * { flex: 1; }
+    .row-sm > * { flex: none; }
+
+    /* -- Group list -- */
+    .group-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      background: #16213e;
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
+    .group-item input[type="checkbox"] { flex-shrink: 0; width: 16px; height: 16px; accent-color: #60a5fa; }
+    .group-info { flex: 1; min-width: 0; }
+    .group-name { font-size: 13px; color: #e0e0e0; }
+    .group-id { font-size: 10px; color: #666; }
+    .btn-del {
+      background: none; border: none; color: #f87171; cursor: pointer;
+      font-size: 16px; padding: 2px 6px; border-radius: 4px;
+    }
+    .btn-del:hover { background: rgba(248,113,113,0.15); }
+
+    /* -- Keyword group items -- */
+    .kw-group-item {
+      background: #16213e;
+      border-radius: 6px;
+      padding: 10px;
+      margin-bottom: 8px;
+    }
+    .kw-group-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .kw-group-header input[type="checkbox"] { width: 16px; height: 16px; accent-color: #60a5fa; }
+    .kw-group-header input[type="text"] { margin-bottom: 0; }
+    .kw-group-keywords textarea { margin-bottom: 0; }
+
+    /* -- Buttons -- */
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-secondary { background: #374151; color: #ccc; }
+    .btn-success { background: #22c55e; color: #fff; }
+    .btn-add { background: #8b5cf6; color: #fff; font-size: 11px; padding: 6px 12px; }
+    .btn:hover { opacity: 0.85; }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid #1e293b;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #22c55e;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+
+    .inline-fields { display: flex; gap: 10px; }
+    .inline-fields > div { flex: 1; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1><span>FB Lead Scraper</span> - Settings</h1>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="groups">Groups</button>
+      <button class="tab" data-tab="schedule">Schedule</button>
+      <button class="tab" data-tab="keywords">Keywords</button>
+      <button class="tab" data-tab="kwgroups">Keyword Groups</button>
+      <button class="tab" data-tab="delivery">Delivery</button>
+    </div>
+
+    <!-- === GROUPS TAB === -->
+    <div class="tab-content active" id="tab-groups">
+      <div class="panel">
+        <h3>Facebook Groups</h3>
+        <p class="hint">Select which groups to crawl. Only checked groups will be included in each crawl.</p>
+        <div style="margin-bottom:10px">
+          <button class="btn btn-primary" id="loadGroupsBtn">Load My Groups</button>
+          <span id="loadGroupsStatus" style="margin-left:10px; font-size:11px; color:#888;"></span>
+        </div>
+        <div id="groupList"></div>
+        <div class="row" style="margin-top:10px">
+          <input type="text" id="newGroupId" placeholder="Group ID (e.g. 217210172609089)">
+          <input type="text" id="newGroupName" placeholder="Group name">
+          <button class="btn btn-add" id="addGroupBtn">+ Add manually</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Posts Per Group</h3>
+        <p class="hint">How many additional pages to fetch beyond the initial page load (each page (appx) 3 posts). Keep low to avoid detection.</p>
+        <div class="inline-fields">
+          <div>
+            <label>Extra pages per group</label>
+            <input type="number" id="maxPages" min="0" max="20" value="5">
+          </div>
+          <div>
+            <label>Dedup retention (days)</label>
+            <input type="number" id="retentionDays" min="1" max="90" value="30">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- === SCHEDULE TAB === -->
+    <div class="tab-content" id="tab-schedule">
+      <div class="panel">
+        <h3>Crawl Schedule</h3>
+        <p class="hint">Set to 0 for manual-only crawling (use the "Crawl Now" button in the popup).</p>
+        <label>Crawl interval (minutes, 0 = manual)</label>
+        <input type="number" id="intervalMinutes" min="0" max="1440" value="0">
+      </div>
+      <div class="panel">
+        <h3>Rate Limiting</h3>
+        <p class="hint">Random pause between requests to mimic human browsing. A value is picked randomly between min and max each time.</p>
+        <label style="margin-bottom:8px; color:#a5b4fc;">Pause after finishing a group, before starting the next one</label>
+        <div class="inline-fields">
+          <div>
+            <label>Min (seconds)</label>
+            <input type="number" id="delayGroupsMin" min="1" max="120" value="8">
+          </div>
+          <div>
+            <label>Max (seconds)</label>
+            <input type="number" id="delayGroupsMax" min="1" max="120" value="15">
+          </div>
+        </div>
+        <label style="margin-top:12px; margin-bottom:8px; color:#a5b4fc;">Pause between each page fetch within a group</label>
+        <div class="inline-fields">
+          <div>
+            <label>Min (seconds)</label>
+            <input type="number" id="delayPagesMin" min="1" max="60" value="3">
+          </div>
+          <div>
+            <label>Max (seconds)</label>
+            <input type="number" id="delayPagesMax" min="1" max="60" value="6">
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Advanced</h3>
+        <label>GraphQL doc_id (change only if Facebook updates their API)</label>
+        <input type="text" id="docId" value="">
+      </div>
+    </div>
+
+    <!-- === KEYWORDS TAB === -->
+    <div class="tab-content" id="tab-keywords">
+      <div class="panel">
+        <h3>Level 1 Keywords (OR matching)</h3>
+        <p class="hint">Posts matching ANY of these keywords pass level 1. One keyword per line. Multi-word phrases are supported.</p>
+        <textarea id="keywords" rows="8" placeholder="subto&#10;subject to&#10;creative&#10;..."></textarea>
+        <div class="inline-fields">
+          <div>
+            <label>Minimum keyword matches</label>
+            <input type="number" id="minMatches" min="1" max="10" value="1">
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Exclude Keywords</h3>
+        <p class="hint">Posts containing ANY of these are skipped immediately (marked as seen so they don't reappear). One per line.</p>
+        <textarea id="excludeKeywords" rows="6" placeholder="just joined&#10;cleaning service&#10;for rent&#10;HOA welcome"></textarea>
+      </div>
+    </div>
+
+    <!-- === KEYWORD GROUPS TAB === -->
+    <div class="tab-content" id="tab-kwgroups">
+      <div class="panel">
+        <h3>Level 2+ Keyword Groups (AND matching)</h3>
+        <p class="hint">
+          Applied after level 1. A post must contain ALL keywords in at least one enabled group to pass.
+          The "All" group is a pass-through - when enabled, everything passes. Groups are OR'd between each other, AND'd within.
+        </p>
+        <div id="kwGroupList"></div>
+        <button class="btn btn-add" id="addKwGroupBtn" style="margin-top:10px">+ Add Group</button>
+      </div>
+    </div>
+
+    <!-- === DELIVERY TAB === -->
+    <div class="tab-content" id="tab-delivery">
+      <div class="panel">
+        <h3>Webhook</h3>
+        <label>Webhook URL</label>
+        <input type="url" id="webhookUrl" placeholder="https://...">
+      </div>
+      <div class="panel">
+        <h3>Batching</h3>
+        <div class="inline-fields">
+          <div>
+            <label>Batch size (items per request)</label>
+            <input type="number" id="batchSize" min="1" max="100" value="12">
+          </div>
+          <div>
+            <label>Delay between batches (sec)</label>
+            <input type="number" id="batchDelay" min="0" max="120" value="20">
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Retry</h3>
+        <div class="inline-fields">
+          <div>
+            <label>Max retry attempts</label>
+            <input type="number" id="retryAttempts" min="1" max="10" value="3">
+          </div>
+          <div>
+            <label>Backoff base (sec)</label>
+            <input type="number" id="retryBackoff" min="1" max="30" value="2">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- === SAVE / CANCEL === -->
+    <div class="actions">
+      <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
+      <button class="btn btn-success" id="saveBtn">Save Settings</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">Settings saved</div>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "FB Group Lead Scraper",
+  "version": "1.1.0",
+  "description": "Crawls Facebook group feeds, filters posts by keywords, and delivers matched leads to a webhook.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "https://www.facebook.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.facebook.com/groups/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FB Lead Scraper"
+  },
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": ["interceptor.js"],
+      "matches": ["https://www.facebook.com/*"]
+    }
+  ]
+}
