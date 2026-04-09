@@ -115,6 +115,26 @@
       color: #888;
       text-align: center;
     }
+    .error-banner {
+      background: #3b1a1a;
+      border: 1px solid #7f1d1d;
+      border-radius: 6px;
+      padding: 6px 10px;
+      margin-bottom: 8px;
+      font-size: 11px;
+      color: #fca5a5;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .error-banner .dismiss {
+      cursor: pointer;
+      color: #888;
+      font-size: 14px;
+      margin-left: 8px;
+      flex-shrink: 0;
+    }
+    .error-banner .dismiss:hover { color: #fca5a5; }
   </style>
 </head>
 <body>
@@ -122,6 +142,8 @@
     <span id="statusDot" class="status on"></span>
     FB Lead Scraper
   </h2>
+
+  <div id="errorBanners"></div>
 
   <div class="stats">
     <div class="stat">

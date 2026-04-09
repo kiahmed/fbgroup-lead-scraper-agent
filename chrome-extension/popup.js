@@ -15,7 +15,28 @@ function timeAgo(ts) {
   return `${Math.floor(sec / 86400)}d ago`;
 }
 
+function renderErrors(errors) {
+  const container = document.getElementById("errorBanners");
+  container.innerHTML = "";
+  if (!errors) return;
+  for (const [key, err] of Object.entries(errors)) {
+    if (!err?.message) continue;
+    const banner = document.createElement("div");
+    banner.className = "error-banner";
+    banner.innerHTML = `<span>${err.message}</span><span class="dismiss" data-key="${key}">&times;</span>`;
+    container.appendChild(banner);
+  }
+  container.querySelectorAll(".dismiss").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "CLEAR_ERRORS" }, () => refresh());
+    });
+  });
+}
+
 function updateUI(data) {
+  // Errors
+  renderErrors(data.errors);
+
   // Stats
   document.getElementById("crawls").textContent = data.stats.crawls || 0;
   document.getElementById("extracted").textContent = data.stats.extracted;

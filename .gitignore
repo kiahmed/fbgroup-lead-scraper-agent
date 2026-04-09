@@ -2,9 +2,10 @@
 logs/
 *.log
 
+# Dev utilities (console scripts, captured data, scratch notes)
+dev-utils/
+
 # Sensitive data
-graphql data.txt
-fb_client_state.json
 .env
 
 # OS

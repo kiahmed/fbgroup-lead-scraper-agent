@@ -6,6 +6,7 @@
   "permissions": [
     "storage",
     "alarms",
+    "notifications",
     "declarativeNetRequest"
   ],
   "host_permissions": [

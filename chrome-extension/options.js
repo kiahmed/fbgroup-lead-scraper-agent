@@ -193,6 +193,13 @@ function populateForm(cfg) {
   document.getElementById("batchDelay").value = cfg.webhook?.batch_delay_sec ?? 20;
   document.getElementById("retryAttempts").value = cfg.webhook?.retry_attempts ?? 3;
   document.getElementById("retryBackoff").value = cfg.webhook?.retry_backoff_sec ?? 2;
+
+  // Notifications
+  document.getElementById("notifyDelivery").checked = cfg.notifications?.on_delivery ?? true;
+  document.getElementById("notifyError").checked = cfg.notifications?.on_error ?? true;
+
+  // Logs
+  document.getElementById("logRetention").value = cfg.logs?.retention_days ?? 7;
 }
 
 // --- Collect form back into config -------------------------------------------
@@ -241,6 +248,17 @@ function collectForm() {
     retry_backoff_sec: parseInt(document.getElementById("retryBackoff").value) || 2,
   };
 
+  // Notifications
+  config.notifications = {
+    on_delivery: document.getElementById("notifyDelivery").checked,
+    on_error: document.getElementById("notifyError").checked,
+  };
+
+  // Logs retention
+  config.logs = {
+    retention_days: parseInt(document.getElementById("logRetention").value) || 7,
+  };
+
   return config;
 }
 
@@ -249,7 +267,11 @@ function collectForm() {
 document.getElementById("saveBtn").addEventListener("click", () => {
   const cfg = collectForm();
   chrome.runtime.sendMessage({ type: "SAVE_CONFIG", config: cfg }, (resp) => {
-    if (resp?.ok) showToast("Settings saved");
+    if (resp?.ok) {
+      showToast("Settings saved");
+    } else {
+      showToast("ERROR saving: " + (resp?.error || "unknown error"));
+    }
   });
 });
 
@@ -259,6 +281,140 @@ document.getElementById("cancelBtn").addEventListener("click", () => {
     populateForm(cfg);
     showToast("Changes discarded");
   });
+});
+
+// --- Logs tab ----------------------------------------------------------------
+
+function timeAgo(ts) {
+  if (!ts) return "never";
+  const sec = Math.floor((Date.now() - ts) / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function loadLogs() {
+  chrome.runtime.sendMessage({ type: "GET_LOGS" }, (data) => {
+    if (!data) return;
+
+    // Group status
+    const gsContainer = document.getElementById("groupStatusList");
+    gsContainer.innerHTML = "";
+    for (const group of data.groups || []) {
+      const s = data.crawlState?.[group.id];
+      const row = document.createElement("div");
+      row.className = "group-status-row";
+      if (s) {
+        const status = s.newPosts > 0 ? "gs-ok" : "gs-detail";
+        row.innerHTML = `
+          <span class="gs-name">${group.name}</span>
+          <span class="${status}">${timeAgo(s.lastCrawl)} &middot; ${s.newPosts ?? 0} new / ${s.duplicates ?? 0} dup &middot; ${s.pages ?? 0} pages</span>
+        `;
+      } else {
+        row.innerHTML = `
+          <span class="gs-name">${group.name}</span>
+          <span class="gs-detail">never crawled</span>
+        `;
+      }
+      gsContainer.appendChild(row);
+    }
+
+    // Error history
+    const ehContainer = document.getElementById("errorHistoryList");
+    ehContainer.innerHTML = "";
+    const errors = (data.errorHistory || []).slice().reverse();
+    if (!errors.length) {
+      ehContainer.innerHTML = "";
+      return;
+    }
+    for (const e of errors) {
+      const div = document.createElement("div");
+      div.className = "log-entry error";
+      div.innerHTML = `<span class="log-time">${new Date(e.timestamp).toLocaleString()}</span><strong>${e.key}</strong>: ${e.message}`;
+      ehContainer.appendChild(div);
+    }
+
+    // Crawl log
+    const clContainer = document.getElementById("crawlLogList");
+    clContainer.innerHTML = "";
+    const logs = (data.crawlLog || []).slice().reverse();
+    for (const entry of logs) {
+      const div = document.createElement("div");
+      div.className = "log-entry";
+      // Support both old string format and new {ts, line} format
+      if (typeof entry === "string") {
+        div.textContent = entry;
+      } else {
+        div.innerHTML = `<span class="log-time">${new Date(entry.ts).toLocaleString()}</span>${entry.line}`;
+      }
+      clContainer.appendChild(div);
+    }
+  });
+}
+
+document.getElementById("clearErrorsBtn").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "CLEAR_ERROR_HISTORY" }, () => {
+    document.getElementById("errorHistoryList").innerHTML = "";
+    showToast("Error history cleared");
+  });
+});
+
+document.getElementById("clearLogsBtn").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "CLEAR_LOGS" }, () => {
+    document.getElementById("crawlLogList").innerHTML = "";
+    showToast("Crawl logs cleared");
+  });
+});
+
+// Refresh logs when switching to the tab
+document.querySelector('[data-tab="logs"]').addEventListener("click", () => {
+  loadLogs();
+});
+
+// --- Export / Import ----------------------------------------------------------
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "EXPORT_CONFIG" }, (cfg) => {
+    const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fb-lead-scraper-config-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Config exported");
+  });
+});
+
+document.getElementById("importBtn").addEventListener("click", () => {
+  document.getElementById("importFile").click();
+});
+
+document.getElementById("importFile").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const cfg = JSON.parse(reader.result);
+      if (!cfg.groups || !cfg.crawl || !cfg.webhook) {
+        showToast("Invalid config file - missing required sections");
+        return;
+      }
+      chrome.runtime.sendMessage({ type: "IMPORT_CONFIG", config: cfg }, (resp) => {
+        if (resp?.ok) {
+          populateForm(cfg);
+          config = cfg;
+          showToast("Config imported");
+        }
+      });
+    } catch (err) {
+      showToast("Invalid JSON file");
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = ""; // allow re-import of same file
 });
 
 // --- Initial load ------------------------------------------------------------

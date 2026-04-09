@@ -48,6 +48,13 @@ const DEFAULTS = {
     doc_id: "34704208309223645",
     interval_minutes: 0,          // 0 = manual only
   },
+  notifications: {
+    on_delivery: true,
+    on_error: true,
+  },
+  logs: {
+    retention_days: 7,
+  },
   state: {
     retention_days: 30,
   },
@@ -57,26 +64,42 @@ const DEFAULTS = {
 let CONFIG = structuredClone(DEFAULTS);
 
 /**
- * Load config from chrome.storage.sync, merging with defaults.
+ * Load config from chrome.storage.local, merging with defaults.
+ * Migrates from chrome.storage.sync if local is empty (one-time migration).
  * Called on startup and before each crawl.
  */
 async function loadConfig() {
-  const stored = await chrome.storage.sync.get("config");
+  let stored = await chrome.storage.local.get("config");
+
+  // One-time migration: move config from sync → local (sync has 8KB/item limit)
+  if (!stored.config) {
+    const synced = await chrome.storage.sync.get("config");
+    if (synced.config) {
+      log("Migrating config from sync to local storage");
+      stored = synced;
+      await chrome.storage.local.set({ config: synced.config });
+      await chrome.storage.sync.remove("config");
+    }
+  }
+
   if (stored.config) {
-    // Deep merge: stored values override defaults
+    // Full replacement: stored config wins, defaults fill any missing keys
     for (const key of Object.keys(DEFAULTS)) {
-      if (stored.config[key] !== undefined) {
-        CONFIG[key] = stored.config[key];
-      }
+      CONFIG[key] = stored.config[key] !== undefined ? stored.config[key] : structuredClone(DEFAULTS[key]);
     }
   }
   return CONFIG;
 }
 
-/** Save current config to chrome.storage.sync. */
+/** Save current config to chrome.storage.local. */
 async function saveConfig(config) {
   CONFIG = config;
-  await chrome.storage.sync.set({ config });
+  try {
+    await chrome.storage.local.set({ config });
+  } catch (e) {
+    log(`ERROR saving config: ${e.message}`);
+    throw e;
+  }
 }
 
 // Relay feature flags - extracted from a real request, relatively stable
@@ -113,6 +136,49 @@ let pendingItems = [];
 let deliveryTimer = null;
 let isCrawling = false;
 let crawlLog = [];          // recent log lines for popup display
+
+// Error tracking - surfaced in popup
+let lastErrors = {};        // { session, docId, rateLimit, delivery } -> { message, timestamp }
+let errorHistory = [];       // persistent ring buffer of all errors
+
+function setError(key, message) {
+  const entry = { key, message, timestamp: Date.now() };
+  lastErrors[key] = entry;
+  errorHistory.push(entry);
+  if (errorHistory.length > 50) errorHistory.splice(0, errorHistory.length - 50);
+  chrome.storage.local.set({ lastErrors, errorHistory });
+  if (CONFIG.notifications?.on_error) {
+    notify("FB Lead Scraper - Error", `Issue detected: ${key}`);
+  }
+}
+
+function clearError(key) {
+  delete lastErrors[key];
+  chrome.storage.local.set({ lastErrors });
+}
+
+async function persistPendingItems() {
+  await chrome.storage.local.set({ pendingItems });
+}
+
+// Chrome notifications (configurable)
+function notify(title, message) {
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title,
+    message,
+  });
+}
+
+// Keepalive: prevent MV3 service worker termination during crawls
+function startKeepalive() {
+  chrome.alarms.create("keepalive", { periodInMinutes: 0.4 });
+}
+
+function stopKeepalive() {
+  chrome.alarms.clear("keepalive");
+}
 
 // Default client-state params captured from a real browser session.
 // The interceptor updates these with fresh values when the user browses Facebook.
@@ -446,6 +512,10 @@ function buildEnvelope(items) {
 
 async function deliverSingle(envelope) {
   const { url, retry_attempts, retry_backoff_sec } = CONFIG.webhook;
+  if (!url) {
+    log("Webhook delivery skipped - no URL configured");
+    return false;
+  }
   for (let attempt = 1; attempt <= retry_attempts; attempt++) {
     try {
       const resp = await fetch(url, {
@@ -472,16 +542,33 @@ async function deliverSingle(envelope) {
 async function flushPendingItems() {
   if (!pendingItems.length) return;
   const items = pendingItems.splice(0);
+  await persistPendingItems(); // persist the now-empty queue
   const { batch_size, batch_delay_sec } = CONFIG.webhook;
   const batches = [];
   for (let i = 0; i < items.length; i += batch_size) batches.push(items.slice(i, i + batch_size));
   log(`Delivering ${items.length} items in ${batches.length} batch(es)`);
+  const failedItems = [];
   for (let i = 0; i < batches.length; i++) {
     const envelope = buildEnvelope(batches[i]);
     const ok = await deliverSingle(envelope);
-    if (ok) stats.delivered += batches[i].length;
+    if (ok) {
+      stats.delivered += batches[i].length;
+    } else {
+      failedItems.push(...batches[i]);
+      setError("delivery", `Webhook failed for ${batches[i].length} items (${new Date().toLocaleTimeString()})`);
+    }
     if (i < batches.length - 1) await new Promise((r) => setTimeout(r, batch_delay_sec * 1000));
   }
+  // Re-queue failed items so they survive restarts and retry on next flush
+  if (failedItems.length) {
+    pendingItems.push(...failedItems);
+    log(`Re-queued ${failedItems.length} items after delivery failure`);
+  }
+  const delivered = items.length - failedItems.length;
+  if (delivered > 0 && CONFIG.notifications?.on_delivery) {
+    notify("FB Lead Scraper", `Delivered ${delivered} lead${delivered > 1 ? "s" : ""} to webhook`);
+  }
+  await persistPendingItems();
   await chrome.storage.local.set({ stats });
 }
 
@@ -561,6 +648,7 @@ async function processStories(stories, groupConfig) {
     log(`  MATCH [${matched.join(", ")}]: "${rawPost.text.substring(0, 60)}..."`);
   }
 
+  await persistPendingItems();
   await chrome.storage.local.set({ stats });
   return result;
 }
@@ -652,6 +740,10 @@ async function fetchGroupHtml(groupId) {
       "Sec-Ch-Ua-Platform": '"Windows"',
     },
   });
+  if (resp.status === 429) {
+    setError("rateLimit", "Facebook rate limited (HTTP 429) - increase delays between requests");
+    throw new Error(`Rate limited (HTTP 429) fetching group ${groupId}`);
+  }
   if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching group ${groupId}`);
   return resp.text();
 }
@@ -742,6 +834,10 @@ async function fetchFeedPage(groupId, cursor, sess) {
     body: payload.toString(),
   });
 
+  if (resp.status === 429) {
+    setError("rateLimit", "Facebook rate limited (HTTP 429) - increase delays between requests");
+    throw new Error("Rate limited (HTTP 429)");
+  }
   if (!resp.ok) throw new Error(`GraphQL HTTP ${resp.status}`);
   let text = await resp.text();
 
@@ -756,12 +852,39 @@ async function fetchFeedPage(groupId, cursor, sess) {
 
   const objects = parseGraphQLResponse(text);
   log(`   GQL parsed ${objects.length} JSON objects`);
+
+  // Check for Facebook error responses
+  for (const obj of objects) {
+    const errCode = obj?.error?.code || obj?.errors?.[0]?.code;
+    const errMsg = obj?.error?.message || obj?.errors?.[0]?.message || "";
+    const errType = obj?.error?.type || obj?.errors?.[0]?.extensions?.type || "";
+
+    if (errCode === 1357001 || errCode === 1357004 || errMsg.includes("login") || errMsg.includes("session")) {
+      setError("session", `GraphQL session error (${errCode || errType}) - log into Facebook`);
+      throw new Error(`Session error: ${errCode || errMsg}`);
+    }
+    if (errType === "field_exception" || errMsg.includes("doc_id") || errMsg.includes("Unknown query")) {
+      setError("docId", `Stale doc_id (${CONFIG.crawl.doc_id.substring(0, 10)}...) - browse a FB group to auto-update`);
+      throw new Error(`doc_id stale: ${errMsg || errType}`);
+    }
+    if (errCode === 1357029 || errMsg.includes("rate") || errMsg.includes("too many")) {
+      setError("rateLimit", `Facebook rate limited - increase delays between requests`);
+      throw new Error(`Rate limited: ${errMsg || errCode}`);
+    }
+  }
+
   let allStories = [];
   let pageInfo = null;
 
   for (const obj of objects) {
     allStories.push(...findStories(obj));
     if (!pageInfo) pageInfo = findPageInfo(obj);
+  }
+
+  // Successful GraphQL response - clear stale errors
+  if (allStories.length) {
+    clearError("docId");
+    clearError("rateLimit");
   }
 
   log(`   GQL found ${allStories.length} stories, cursor: ${pageInfo?.end_cursor ? "yes" : "no"}, hasNext: ${pageInfo?.has_next_page}`);
@@ -779,10 +902,22 @@ async function crawlGroup(groupConfig) {
   const html = await fetchGroupHtml(groupConfig.id);
   log(`   Fetched HTML: ${html.length} bytes`);
 
+  // Step 1b: Detect login redirect or checkpoint (session expired)
+  if (html.includes("/login/") && !html.includes("fb_dtsg") ||
+      html.includes("/checkpoint/") ||
+      html.includes("login_form") ||
+      html.length < 5000 && html.includes("redirect")) {
+    const reason = html.includes("/checkpoint/") ? "checkpoint page" : "login redirect";
+    log(`   ERROR: Facebook returned ${reason} - session expired, please log into Facebook`);
+    setError("session", `Session expired (${reason}) - log into Facebook and browse a group`);
+    return;
+  }
+
   // Step 2: Extract/refresh session tokens
   const tokens = extractSessionFromHtml(html);
   if (tokens.fbDtsg) {
     session = tokens;
+    clearError("session");
     // Merge any client params extracted from HTML into clientState
     const cp = tokens.clientParams || {};
     const cpCount = Object.keys(cp).length;
@@ -799,6 +934,7 @@ async function crawlGroup(groupConfig) {
     }
   } else if (!session) {
     log(`   ERROR: No fb_dtsg found and no cached session`);
+    setError("session", "No fb_dtsg found - log into Facebook and browse a group");
     return;
   } else {
     log(`   Using cached session (no fb_dtsg in this page)`);
@@ -890,11 +1026,16 @@ async function crawlGroup(groupConfig) {
   };
   await chrome.storage.local.set({ crawlState });
 
-  // Persist crawl log to storage (ring buffer, last 500 lines)
+  // Persist crawl log to storage with timestamps for retention pruning
   const stored = (await chrome.storage.local.get("crawlLogHistory")).crawlLogHistory || [];
-  stored.push(...crawlLog.slice(-20).map((l) => `[${groupConfig.name}] ${l}`));
-  if (stored.length > 500) stored.splice(0, stored.length - 500);
-  await chrome.storage.local.set({ crawlLogHistory: stored });
+  const now = Date.now();
+  stored.push(...crawlLog.slice(-20).map((l) => ({ ts: now, line: `[${groupConfig.name}] ${l}` })));
+  // Prune by retention + hard cap
+  const retentionMs = (CONFIG.logs?.retention_days || 7) * 86400000;
+  const cutoff = now - retentionMs;
+  const pruned = stored.filter((e) => (e.ts || 0) > cutoff);
+  if (pruned.length > 1000) pruned.splice(0, pruned.length - 1000);
+  await chrome.storage.local.set({ crawlLogHistory: pruned });
 }
 
 /**
@@ -920,6 +1061,7 @@ async function crawlAllGroups() {
   }
 
   isCrawling = true;
+  startKeepalive();
   stats.crawls++;
   log(`=== Starting crawl of ${activeGroups.length} group(s) ===`);
 
@@ -943,6 +1085,7 @@ async function crawlAllGroups() {
   await flushPendingItems();
 
   isCrawling = false;
+  stopKeepalive();
   await chrome.storage.local.set({ stats });
   log(`=== Crawl complete. Extracted: ${stats.extracted}, Matched: ${stats.matched}, Delivered: ${stats.delivered} ===`);
 }
@@ -991,6 +1134,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         crawlState: stateResult.crawlState || {},
         groups: CONFIG.groups,
         nextAlarm: alarm?.scheduledTime || null,
+        errors: lastErrors,
+        errorHistory,
       });
     });
     return true; // async sendResponse
@@ -1015,12 +1160,49 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     saveConfig(msg.config).then(() => {
       setupAlarm(msg.config.crawl?.interval_minutes || 0);
       sendResponse({ ok: true });
+    }).catch((e) => {
+      sendResponse({ ok: false, error: e.message });
     });
     return true;
   } else if (msg.type === "LOAD_GROUPS") {
     fetchMyGroups()
       .then((groups) => sendResponse({ ok: true, groups }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  } else if (msg.type === "CLEAR_ERRORS") {
+    lastErrors = {};
+    chrome.storage.local.set({ lastErrors });
+    sendResponse({ ok: true });
+  } else if (msg.type === "GET_LOGS") {
+    Promise.all([
+      chrome.storage.local.get(["crawlLogHistory", "errorHistory", "crawlState"]),
+    ]).then(([result]) => {
+      sendResponse({
+        crawlLog: result.crawlLogHistory || [],
+        errorHistory: result.errorHistory || [],
+        crawlState: result.crawlState || {},
+        groups: CONFIG.groups,
+      });
+    });
+    return true;
+  } else if (msg.type === "CLEAR_LOGS") {
+    chrome.storage.local.set({ crawlLogHistory: [] });
+    sendResponse({ ok: true });
+  } else if (msg.type === "CLEAR_ERROR_HISTORY") {
+    errorHistory = [];
+    lastErrors = {};
+    chrome.storage.local.set({ errorHistory, lastErrors });
+    sendResponse({ ok: true });
+  } else if (msg.type === "EXPORT_CONFIG") {
+    loadConfig().then((cfg) => sendResponse(cfg));
+    return true;
+  } else if (msg.type === "IMPORT_CONFIG") {
+    saveConfig(msg.config).then(() => {
+      setupAlarm(msg.config.crawl?.interval_minutes || 0);
+      sendResponse({ ok: true });
+    }).catch((e) => {
+      sendResponse({ ok: false, error: e.message });
+    });
     return true;
   } else if (msg.type === "CLIENT_STATE") {
     clientState = { ...DEFAULT_CLIENT_STATE, ...msg.data };
@@ -1077,17 +1259,28 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     log("Scheduled crawl triggered");
     crawlAllGroups();
   }
+  // keepalive alarm - no action needed, just keeps the service worker alive
 });
 
 // --- Startup -----------------------------------------------------------------
 
-chrome.storage.local.get(["stats", "clientState"], (result) => {
+chrome.storage.local.get(["stats", "clientState", "pendingItems", "lastErrors", "errorHistory"], (result) => {
   if (result.stats) stats = result.stats;
   if (result.clientState) {
     clientState = { ...DEFAULT_CLIENT_STATE, ...result.clientState };
     log(`Loaded cached client state (${Object.keys(result.clientState).length} fresh params)`);
   } else {
     log(`Using default client state (${Object.keys(clientState).length} params)`);
+  }
+  if (result.pendingItems?.length) {
+    pendingItems = result.pendingItems;
+    log(`Restored ${pendingItems.length} pending items from storage`);
+  }
+  if (result.lastErrors) {
+    lastErrors = result.lastErrors;
+  }
+  if (result.errorHistory) {
+    errorHistory = result.errorHistory;
   }
 });
 

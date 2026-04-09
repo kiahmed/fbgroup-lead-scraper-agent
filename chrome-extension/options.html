@@ -169,6 +169,39 @@
 
     .inline-fields { display: flex; gap: 10px; }
     .inline-fields > div { flex: 1; }
+
+    .log-viewer {
+      background: #0d1117;
+      border-radius: 6px;
+      padding: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: "Cascadia Code", "Fira Code", monospace;
+      font-size: 11px;
+      line-height: 1.6;
+      color: #8b949e;
+    }
+    .log-viewer:empty::after {
+      content: "No entries yet.";
+      color: #555;
+    }
+    .log-entry { padding: 2px 0; border-bottom: 1px solid #161b22; }
+    .log-entry .log-time { color: #555; margin-right: 8px; }
+    .log-entry.error { color: #fca5a5; }
+
+    .group-status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      background: #16213e;
+      border-radius: 4px;
+      margin-bottom: 4px;
+    }
+    .group-status-row .gs-name { color: #a5b4fc; font-weight: 500; }
+    .group-status-row .gs-detail { color: #888; font-size: 11px; }
+    .group-status-row .gs-ok { color: #4ade80; }
+    .group-status-row .gs-fail { color: #f87171; }
   </style>
 </head>
 <body>
@@ -181,6 +214,7 @@
       <button class="tab" data-tab="keywords">Keywords</button>
       <button class="tab" data-tab="kwgroups">Keyword Groups</button>
       <button class="tab" data-tab="delivery">Delivery</button>
+      <button class="tab" data-tab="logs">Logs</button>
     </div>
 
     <!-- === GROUPS TAB === -->
@@ -322,12 +356,60 @@
           </div>
         </div>
       </div>
+      <div class="panel">
+        <h3>Notifications</h3>
+        <p class="hint">Chrome desktop notifications. Errors show a generic alert without details.</p>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="notifyDelivery"> Notify when leads are delivered
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="notifyError"> Notify on errors
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- === LOGS TAB === -->
+    <div class="tab-content" id="tab-logs">
+      <div class="panel">
+        <h3>Group Status</h3>
+        <p class="hint">Last crawl results per group.</p>
+        <div id="groupStatusList" style="font-size:12px;"></div>
+      </div>
+      <div class="panel">
+        <h3>Error History</h3>
+        <p class="hint">Recent errors (last 50). Persists across restarts.</p>
+        <div id="errorHistoryList" class="log-viewer"></div>
+        <div style="margin-top:8px; text-align:right;">
+          <button class="btn btn-secondary" id="clearErrorsBtn" style="font-size:11px; padding:4px 10px;">Clear Errors</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Crawl Log</h3>
+        <p class="hint">Recent crawl activity log.</p>
+        <div id="crawlLogList" class="log-viewer"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+          <div>
+            <label style="font-size:12px;">Log retention (days)</label>
+            <input type="number" id="logRetention" min="1" max="90" value="7" style="width:60px; margin-left:6px;">
+          </div>
+          <button class="btn btn-secondary" id="clearLogsBtn" style="font-size:11px; padding:4px 10px;">Clear Logs</button>
+        </div>
+      </div>
     </div>
 
     <!-- === SAVE / CANCEL === -->
     <div class="actions">
       <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
       <button class="btn btn-success" id="saveBtn">Save Settings</button>
+    </div>
+
+    <!-- === EXPORT / IMPORT === -->
+    <div class="actions" style="margin-top: 12px; border-top: 1px solid #1e293b; padding-top: 16px;">
+      <button class="btn btn-secondary" id="exportBtn">Export Config</button>
+      <button class="btn btn-secondary" id="importBtn">Import Config</button>
+      <input type="file" id="importFile" accept=".json" style="display:none">
     </div>
   </div>
 
