@@ -115,15 +115,16 @@ function renderKwGroups() {
   config.keyword_groups.forEach((group, i) => {
     const el = document.createElement("div");
     el.className = "kw-group-item";
+    const isAll = group.name === "All";
     el.innerHTML = `
       <div class="kw-group-header">
         <input type="checkbox" ${group.enabled ? "checked" : ""} data-idx="${i}">
-        <input type="text" value="${group.name}" data-idx="${i}" data-field="name" placeholder="Group name" style="flex:1">
-        <button class="btn-del" data-idx="${i}">&times;</button>
+        <input type="text" value="${group.name}" data-idx="${i}" data-field="name" placeholder="Group name" style="flex:1" ${isAll ? "disabled" : ""}>
+        ${isAll ? "" : `<button class="btn-del" data-idx="${i}">&times;</button>`}
       </div>
-      <div class="kw-group-keywords">
+      ${isAll ? '<div class="kw-group-hint" style="padding:4px 8px;color:#888;font-size:12px">Pass-through: all L1 matches delivered without further filtering</div>' : `<div class="kw-group-keywords">
         <textarea rows="2" data-idx="${i}" data-field="keywords" placeholder="Keywords (one per line)">${(group.keywords || []).join("\n")}</textarea>
-      </div>
+      </div>`}
     `;
     container.appendChild(el);
   });
@@ -131,13 +132,28 @@ function renderKwGroups() {
   // Bind events
   container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
     cb.addEventListener("change", () => {
-      config.keyword_groups[parseInt(cb.dataset.idx)].enabled = cb.checked;
+      const idx = parseInt(cb.dataset.idx);
+      config.keyword_groups[idx].enabled = cb.checked;
+      if (cb.checked && config.keyword_groups[idx].name === "All") {
+        // "All" checked → uncheck everything else
+        config.keyword_groups.forEach((g, j) => { if (j !== idx) g.enabled = false; });
+        renderKwGroups();
+      } else if (cb.checked && config.keyword_groups[idx].name !== "All") {
+        // Any other group checked → uncheck "All"
+        config.keyword_groups.forEach((g) => { if (g.name === "All") g.enabled = false; });
+        renderKwGroups();
+      }
     });
   });
 
   container.querySelectorAll('input[data-field="name"]').forEach((input) => {
     input.addEventListener("input", () => {
-      config.keyword_groups[parseInt(input.dataset.idx)].name = input.value;
+      const idx = parseInt(input.dataset.idx);
+      if (input.value.trim() === "All" && config.keyword_groups[idx].name !== "All") {
+        input.value = config.keyword_groups[idx].name;
+        return;
+      }
+      config.keyword_groups[idx].name = input.value;
     });
   });
 

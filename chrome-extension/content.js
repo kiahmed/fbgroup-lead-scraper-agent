@@ -40,18 +40,23 @@ if (document.readyState === "complete") {
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
 
-  if (event.data?.type === "FB_GRAPHQL_RESPONSE") {
-    chrome.runtime.sendMessage({
-      type: "GRAPHQL_FEED_RESPONSE",
-      query: event.data.query,
-      payload: event.data.payload,
-      url: window.location.href,
-    });
-  } else if (event.data?.type === "FB_CLIENT_STATE") {
-    chrome.runtime.sendMessage({
-      type: "CLIENT_STATE",
-      data: event.data.data,
-    });
+  try {
+    if (event.data?.type === "FB_GRAPHQL_RESPONSE") {
+      chrome.runtime.sendMessage({
+        type: "GRAPHQL_FEED_RESPONSE",
+        query: event.data.query,
+        payload: event.data.payload,
+        url: window.location.href,
+      });
+    } else if (event.data?.type === "FB_CLIENT_STATE") {
+      chrome.runtime.sendMessage({
+        type: "CLIENT_STATE",
+        data: event.data.data,
+      });
+    }
+  } catch (e) {
+    // Service worker may be inactive (MV3 kills it after ~30s idle).
+    // These messages are best-effort — the active crawler doesn't depend on them.
   }
 });
 

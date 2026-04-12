@@ -148,7 +148,7 @@ function setError(key, message) {
   if (errorHistory.length > 50) errorHistory.splice(0, errorHistory.length - 50);
   chrome.storage.local.set({ lastErrors, errorHistory });
   if (CONFIG.notifications?.on_error) {
-    notify("FB Lead Scraper - Error", `Issue detected: ${key}`);
+    notify("FB Lead Scraper - Error", `Issue detected: ${key}`, "error");
   }
 }
 
@@ -162,10 +162,16 @@ async function persistPendingItems() {
 }
 
 // Chrome notifications (configurable)
-function notify(title, message) {
+const NOTIFY_ICONS = {
+  success: "icons/icon128_success.png",
+  error: "icons/icon128_error.png",
+  default: "icons/icon128.png",
+};
+
+function notify(title, message, type = "default") {
   chrome.notifications.create({
     type: "basic",
-    iconUrl: "icons/icon128.png",
+    iconUrl: NOTIFY_ICONS[type] || NOTIFY_ICONS.default,
     title,
     message,
   });
@@ -404,9 +410,24 @@ function extractTimestamp(story) {
   return story.creation_time || 0;
 }
 
+function detectMedia(story) {
+  let hasImages = false, hasVideos = false;
+  const walk = (obj, depth) => {
+    if ((hasImages && hasVideos) || depth > 30 || !obj || typeof obj !== "object") return;
+    if (Array.isArray(obj)) { for (const v of obj) walk(v, depth + 1); return; }
+    const t = obj.__typename;
+    if (t === "Photo" || t === "StoryAttachmentPhoto") hasImages = true;
+    if (t === "Video" || t === "StoryAttachmentVideo") hasVideos = true;
+    for (const v of Object.values(obj)) walk(v, depth + 1);
+  };
+  walk(story, 0);
+  return { hasImages, hasVideos };
+}
+
 function extractPost(story) {
   const fp = story.feedback?.owning_profile || {};
   const timestamp = extractTimestamp(story);
+  const { hasImages, hasVideos } = detectMedia(story);
   return {
     post_id: story.post_id || "",
     post_url: story.permalink_url || "",
@@ -417,6 +438,8 @@ function extractPost(story) {
     timestamp,
     time: timestamp ? new Date(timestamp * 1000).toISOString() : null,
     likes: 0,
+    hasImages,
+    hasVideos,
   };
 }
 
@@ -493,6 +516,8 @@ function transformPost(rawPost, matchedKeywords, groupConfig) {
     content: rawPost.text,
     keywords: matchedKeywords,
     likes: rawPost.likes || 0,
+    hasImages: rawPost.hasImages,
+    hasVideos: rawPost.hasVideos,
     postedAt: formatTimestamp(rawPost.time),
     groupId: groupConfig.id,
     groupName: groupConfig.name,
@@ -566,7 +591,7 @@ async function flushPendingItems() {
   }
   const delivered = items.length - failedItems.length;
   if (delivered > 0 && CONFIG.notifications?.on_delivery) {
-    notify("FB Lead Scraper", `Delivered ${delivered} lead${delivered > 1 ? "s" : ""} to webhook`);
+    notify("FB Lead Scraper", `Delivered ${delivered} lead${delivered > 1 ? "s" : ""} to webhook`, "success");
   }
   await persistPendingItems();
   await chrome.storage.local.set({ stats });
